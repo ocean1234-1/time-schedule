@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ja">
+<div class="nav">
+  <button class="active" onclick="location.href='タイムスケジュール.html'">タイムスケジュール</button>
+  <button onclick="location.href='シフト表.html'">シフト表</button>
+  <button onclick="location.href='予約管理ページ.html'">予約管理</button>
+  <button onclick="location.href='割引設定ページ.html'">割引設定ページ</button>
+  <button onclick="location.href='キャストオプションリスト.html'">キャストオプションリスト</button>
+</div>
+
+<head>
+  <meta charset="UTF-8">
+  <title>月別タイムスケジュール（20行固定＋予約＋プルダウン時間＋未入力対応）</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; overflow-x: auto; }
+    .schedule-wrapper { display: flex; border: 1px solid #ccc; }
+
+    /* 上部のタブ */
+    .tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; margin-bottom: 10px; border-bottom: 2px solid #ccc; }
+    .tab { padding: 5px 10px; cursor: pointer; border: 1px solid #ccc; border-bottom: none; background: #eee; margin-right: 2px; font-size: 12px; }
+    .tab.active { background: #fff; font-weight: bold; }
+
+    /* 並べ替えボタン */
+    .top-buttons { margin: 10px 0; }
+    .top-buttons button { padding: 5px 10px; }
+
+    /* 左側 */
+    .sidebar { flex: 0 0 500px; border-right: 1px solid #ccc; background: #f9f9f9; }
+    .header { display: flex; border-bottom: 1px solid #ccc; background: #eee; font-weight: bold; text-align: center; }
+    .header div { padding: 5px; border-right: 1px solid #ccc; }
+    .person-row { display: flex; border-bottom: 1px solid #eee; height: 40px; }
+    .col { flex: 0 0 120px; display: flex; align-items: center; justify-content: center; font-size: 13px; border-right: 1px solid #eee; }
+    .col input, .col select { width: 95%; font-size: 12px; padding: 2px; text-align: center; }
+
+    /* 右側 */
+    .timeline { flex: 1; overflow-x: auto; }
+    .hours { display: flex; border-bottom: 1px solid #ccc; background: #fafafa; position: sticky; top: 0; }
+    .hour { min-width: 80px; text-align: center; border-right: 1px solid #eee; font-size: 12px; padding: 5px 0; }
+    .rows { display: flex; flex-direction: column; }
+    .row { display: flex; border-bottom: 1px solid #eee; height: 40px; position: relative; }
+    .cell { min-width: 80px; border-right: 1px solid #f0f0f0; }
+
+    .event {
+      position: absolute; top: 5px; height: 30px;
+      background: #90ee90; border-radius: 5px;
+      padding: 2px; font-size: 12px;
+      white-space: nowrap; overflow: hidden;
+    }
+    .event-yellow {
+      position: absolute; top: 5px; height: 30px;
+      background: yellow; border: 1px solid #999;
+      border-radius: 5px; font-size: 10px;
+      padding: 2px; white-space: nowrap; overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <h2>月別タイムスケジュール（20行固定＋予約＋プルダウン時間＋未入力対応）</h2>
+
+  <!-- 月選択 -->
+  <label>対象月: <input type="month" id="monthSelect" onchange="generateTabs()"></label>
+
+  <!-- 日付タブ -->
+  <div class="tabs" id="dateTabs"></div>
+
+  <!-- 並べ替えボタン -->
+  <div class="top-buttons">
+    <button onclick="sortByStartTime()">⏰ 出勤時間順に並べ替え</button>
+  </div>
+
+  <div class="schedule-wrapper">
+    <div class="sidebar" id="sidebar">
+      <div class="header">
+        <div style="flex:0 0 120px;">人物</div>
+        <div style="flex:0 0 120px;">場所</div>
+        <div style="flex:0 0 120px;">出勤時間</div>
+        <div style="flex:0 0 120px;">退勤時間</div>
+      </div>
+    </div>
+    <div class="timeline">
+      <div class="hours" id="hours"></div>
+      <div class="rows" id="rows"></div>
+    </div>
+  </div>
+
+<script>
+const startHour = 9;
+const endHour = 28; // 翌4時まで
+const widthPerHour = 80;
+const maxPeople = 20;
+
+// 🔹 時間選択肢を生成（9:00〜28:00, 30分刻み）
+function generateTimeOptions(selected="") {
+  let opts = `<option value="">--</option>`; // 未入力に戻せる
+  for (let h = startHour; h <= endHour; h++) {
+    const displayH = h > 24 ? h - 24 : h;
+    for (let m of [0,30]) {
+      const val = `${String(displayH).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+      const realVal = `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+      opts += `<option value="${realVal}" ${selected===realVal?"selected":""}>${val}</option>`;
+    }
+  }
+  return opts;
+}
+
+function formatDateLocal(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2,"0");
+  const d = String(date.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+
+// 時間軸生成
+function generateHours() {
+  const hoursDiv = document.getElementById("hours");
+  hoursDiv.innerHTML = "";
+  for (let h = startHour; h <= endHour; h++) {
+    const hour = h > 24 ? h - 24 : h;
+    const hourDiv = document.createElement("div");
+    hourDiv.className = "hour";
+    hourDiv.textContent = `${String(hour).padStart(2,"0")}:00`;
+    hoursDiv.appendChild(hourDiv);
+  }
+}
+
+// タブ生成
+function generateTabs() {
+  const monthInput = document.getElementById("monthSelect").value;
+  if (!monthInput) return;
+  const [year, month] = monthInput.split("-");
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  const tabsDiv = document.getElementById("dateTabs");
+  tabsDiv.innerHTML = "";
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month - 1, d);
+    const weekday = ["日","月","火","水","木","金","土"][date.getDay()];
+    const tab = document.createElement("div");
+    tab.className = "tab";
+    tab.textContent = `${d}日(${weekday})`;
+    tab.dataset.date = formatDateLocal(date);
+    tab.onclick = () => { 
+      document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+      tab.classList.add("active");
+      loadSchedule(tab.dataset.date);
+    };
+    tabsDiv.appendChild(tab);
+  }
+
+  const today = formatDateLocal(new Date());
+  const todayTab = Array.from(tabsDiv.children).find(t => t.dataset.date === today);
+  if (todayTab) todayTab.click();
+  else tabsDiv.children[0]?.click();
+}
+
+// 出勤バー描画
+function drawShift(row, startTime, endTime) {
+  const [sh, sm] = startTime.split(":").map(Number);
+  const [eh, em] = endTime.split(":").map(Number);
+
+  let start = sh + sm/60;
+  let end = eh + em/60;
+  if (sh < 9) start += 24;
+  if (eh < 9 || end < start) end += 24;
+
+  const eventDiv = document.createElement("div");
+  eventDiv.className = "event";
+  eventDiv.style.left = ((start - startHour) * widthPerHour) + "px";
+  eventDiv.style.width = ((end - start) * widthPerHour) + "px";
+  eventDiv.textContent = `${startTime}〜${endTime}`;
+  row.appendChild(eventDiv);
+}
+
+// スケジュール読み込み
+function loadSchedule(dateStr) {
+  const sidebar = document.getElementById("sidebar");
+  const rowsDiv = document.getElementById("rows");
+  sidebar.querySelectorAll(".person-row").forEach(e => e.remove());
+  rowsDiv.innerHTML = "";
+
+  generateHours();
+
+  let savedData = JSON.parse(localStorage.getItem("shift_" + dateStr) || "[]");
+  while (savedData.length < maxPeople) {
+    savedData.push({ name:"", place:"", start:"", end:"" });
+  }
+
+  savedData.forEach((p, i) => {
+    if (p.name && !p.start && !p.end) return;
+
+    const row = document.createElement("div");
+    row.className = "person-row";
+
+    // 名前
+    const personCol = document.createElement("div");
+    personCol.className = "col";
+    const personInput = document.createElement("input");
+    personInput.value = p.name || "";
+    personCol.appendChild(personInput);
+
+    // 場所
+    const placeCol = document.createElement("div");
+    placeCol.className = "col";
+    const placeInput = document.createElement("input");
+    placeInput.value = p.place || "";
+    placeCol.appendChild(placeInput);
+
+    // 出勤時間
+    const startCol = document.createElement("div");
+    startCol.className = "col";
+    const startSelect = document.createElement("select");
+    startSelect.innerHTML = generateTimeOptions(p.start || "");
+    startCol.appendChild(startSelect);
+
+    // 退勤時間
+    const endCol = document.createElement("div");
+    endCol.className = "col";
+    const endSelect = document.createElement("select");
+    endSelect.innerHTML = generateTimeOptions(p.end || "");
+    endCol.appendChild(endSelect);
+
+    row.appendChild(personCol);
+    row.appendChild(placeCol);
+    row.appendChild(startCol);
+    row.appendChild(endCol);
+    sidebar.appendChild(row);
+
+    const timelineRow = document.createElement("div");
+    timelineRow.className = "row";
+    rowsDiv.appendChild(timelineRow);
+
+    // 予約（黄色バー）
+const reservations = JSON.parse(localStorage.getItem("reservations_" + dateStr) || "[]");
+reservations.forEach(r => {
+  const sidebarRows = document.querySelectorAll("#sidebar .person-row");
+  sidebarRows.forEach((row, idx) => {
+    const castInput = row.querySelector(".col input");
+    if (castInput && castInput.value.trim() === r.cast) {
+      const timelineRow = document.querySelectorAll("#rows .row")[idx];
+      if (!timelineRow) return;
+
+      const [sh, sm] = r.start.split(":").map(Number);
+      let start = sh + sm/60;
+      let end = start + (r.course ? r.course/60 : 1); // courseがなければ仮1時間
+
+      if (sh < 9) start += 24;
+      if (end < start) end += 24;
+
+      const reserveDiv = document.createElement("div");
+      reserveDiv.className = "event-yellow";
+      reserveDiv.style.left = ((start - startHour) * widthPerHour) + "px";
+      reserveDiv.style.width = ((end - start) * widthPerHour) + "px";
+      reserveDiv.innerHTML =
+        `${r.place || "予約"} ～ ${r.end || ""}` +
+        ((r.course || r.amount) 
+           ? `<br>${r.course ? r.course + "分" : ""} ${r.amount ? r.amount + "円" : ""}`
+           : "");
+      timelineRow.appendChild(reserveDiv);
+    }
+  });
+});
+
+
+    if (p.start && p.end) {
+      drawShift(timelineRow, p.start, p.end);
+    }
+
+    // 🔹 入力変更時に保存
+    [personInput, placeInput, startSelect, endSelect].forEach(input => {
+      input.addEventListener("change", () => {
+        let currentData = JSON.parse(localStorage.getItem("shift_" + dateStr) || "[]");
+        while (currentData.length < maxPeople) {
+          currentData.push({ name:"", place:"", start:"", end:"" });
+        }
+
+        const enteredName = personInput.value.trim();
+
+        if (enteredName) {
+          let idx = currentData.findIndex(p => p.name === enteredName);
+          if (idx === -1) {
+            idx = currentData.findIndex(p => !p.name);
+            if (idx === -1) idx = i;
+          }
+          currentData[idx] = {
+            name: enteredName,
+            place: placeInput.value.trim(),
+            start: startSelect.value,
+            end: endSelect.value
+          };
+        } else {
+          if (startSelect.value || endSelect.value) {
+            currentData[i] = {
+              name: "",
+              place: placeInput.value.trim(),
+              start: startSelect.value,
+              end: endSelect.value
+            };
+          } else {
+            currentData[i] = { name:"", place:"", start:"", end:"" };
+          }
+        }
+        localStorage.setItem("shift_" + dateStr, JSON.stringify(currentData));
+      });
+    });
+  });
+
+  // 🔹 予約（黄色バー）描画
+  const reservations = JSON.parse(localStorage.getItem("reservations_" + dateStr) || "[]");
+  reservations.forEach(r => {
+    const sidebarRows = document.querySelectorAll("#sidebar .person-row");
+    sidebarRows.forEach((row, idx) => {
+      const castInput = row.querySelector(".col input");
+      if (castInput && castInput.value.trim() === r.cast) {
+        const timelineRow = document.querySelectorAll("#rows .row")[idx];
+        if (!timelineRow) return;
+
+        const [sh, sm] = r.start.split(":").map(Number);
+        let start = sh + sm/60;
+        let end = start + (r.course ? r.course/60 : 1);
+        if (sh < 9) start += 24;
+        if (end < start) end += 24;
+
+        const reserveDiv = document.createElement("div");
+        reserveDiv.className = "event-yellow";
+        reserveDiv.style.left = ((start - startHour) * widthPerHour) + "px";
+        reserveDiv.style.width = ((end - start) * widthPerHour) + "px";
+        reserveDiv.innerHTML =
+          `${r.place || "予約"} ～ ${r.end || ""}` +
+          ((r.course || r.amount) 
+             ? `<br>${r.course ? r.course + "分" : ""} ${r.amount ? r.amount + "円" : ""}`
+             : "");
+        timelineRow.appendChild(reserveDiv);
+      }
+    });
+  });
+}
+
+// 出勤時間順に並べ替え → 保存
+function sortByStartTime() {
+  const activeTab = document.querySelector(".tab.active");
+  if (!activeTab) return;
+  const dateStr = activeTab.dataset.date;
+
+  let savedData = JSON.parse(localStorage.getItem("shift_" + dateStr) || "[]");
+  while (savedData.length < maxPeople) {
+    savedData.push({ name:"", place:"", start:"", end:"" });
+  }
+
+  let withTime = savedData.filter(p => p.start || p.end);
+  let noTime = savedData.filter(p => !p.start && !p.end);
+
+  withTime.sort((a, b) => {
+    const getTime = (p) => {
+      if (!p.start) return 999;
+      const [h, m] = p.start.split(":").map(Number);
+      return (h < 9 ? h + 24 : h) + m/60;
+    };
+    return getTime(a) - getTime(b);
+  });
+
+  let newData = [...withTime, ...noTime].slice(0, maxPeople);
+  localStorage.setItem("shift_" + dateStr, JSON.stringify(newData));
+  loadSchedule(dateStr);
+}
+
+// 初期処理
+window.addEventListener("load", () => {
+  const now = new Date();
+  document.getElementById("monthSelect").value = 
+    `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  generateTabs();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<div class="nav">
+  <button onclick="location.href='タイムスケジュール.html'">タイムスケジュール</button>
+  <button class="active" onclick="location.href='シフト表.html'">シフト表</button>
+  <button onclick="location.href='予約管理ページ.html'">予約管理</button>
+  <button onclick="location.href='割引設定ページ.html'">割引設定ページ</button>
+  <button onclick="location.href='キャストオプションリスト.html'">キャストオプションリスト</button>
+</div>
+
+<head>
+  <meta charset="UTF-8">
+  <title>1か月分シフト表（チャット入力対応＋24時超え対応）</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; overflow-x: auto; }
+    .schedule-wrapper { display: flex; border: 1px solid #ccc; }
+    .sidebar { flex: 0 0 240px; border-right: 1px solid #ccc; background: #f9f9f9; position: sticky; left: 0; z-index: 5; }
+    .header { display: flex; border-bottom: 1px solid #ccc; background: #eee; font-weight: bold; text-align: center; position: sticky; top: 0; z-index: 10; }
+    .header div { padding: 5px; border-right: 1px solid #ccc; }
+    .person-row { display: flex; border-bottom: 1px solid #eee; height: 50px; }
+    .person, .place { flex: 0 0 120px; display: flex; align-items: center; justify-content: center; border-right: 1px solid #eee; }
+    .person input, .place input { width: 90%; font-size: 12px; padding: 2px; }
+    .timeline { flex: 1; overflow-x: auto; }
+    .days { display: flex; border-bottom: 1px solid #ccc; background: #fafafa; position: sticky; top: 0; z-index: 10; }
+    .day { min-width: 120px; text-align: center; border-right: 1px solid #eee; font-size: 12px; padding: 5px 0; }
+    .rows { display: flex; flex-direction: column; }
+    .row { display: flex; border-bottom: 1px solid #eee; height: 50px; }
+    .cell { min-width: 120px; border-right: 1px solid #f0f0f0; text-align: center; display: flex; flex-direction: column; justify-content: center; font-size: 11px; }
+    .time-select { display: flex; justify-content: center; gap: 2px; }
+    select { font-size: 11px; }
+    .chat-box { margin: 15px 0; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; }
+    .chat-box textarea { width: 80%; height: 40px; font-size: 14px; }
+    .chat-box button { padding: 5px 10px; margin-left: 5px; }
+  </style>
+</head>
+<body>
+  <h2>1か月分シフト表（チャット入力対応＋24時超え対応）</h2>
+  <label>対象月: <input type="month" id="monthSelect" onchange="generateTable()"></label>
+  <button onclick="applyShifts()">反映</button>
+
+  <!-- チャット入力ボックス -->
+  <div class="chat-box">
+    <textarea id="chatInput" placeholder="例: きょうか 9/1 23:00～25:00 あい 9/2 26:30～28:00"></textarea>
+    <button onclick="processChat()">送信</button>
+  </div>
+
+  <div class="schedule-wrapper">
+    <div class="sidebar" id="sidebar">
+      <div class="header">
+        <div style="flex:0 0 120px;">キャスト名</div>
+        <div style="flex:0 0 120px;">お迎え場所</div>
+      </div>
+    </div>
+    <div class="timeline">
+      <div class="days" id="days"></div>
+      <div class="rows" id="rows"></div>
+    </div>
+  </div>
+
+<script>
+  const numPeople = 50;
+  const hours = Array.from({length: 29}, (_,i)=>String(i).padStart(2,"0"));
+  const minutes = Array.from({length: 60}, (_,i)=>String(i).padStart(2,"0"));
+
+  // ✅ ローカル日付フォーマット関数（ズレ防止）
+  function formatDateLocal(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function generateTable() {
+    const monthInput = document.getElementById("monthSelect").value;
+    if (!monthInput) return;
+    localStorage.setItem("shift_selectedMonth", monthInput);
+    const [year, month] = monthInput.split("-");
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    const sidebar = document.getElementById("sidebar");
+    const daysDiv = document.getElementById("days");
+    const rowsDiv = document.getElementById("rows");
+
+    sidebar.querySelectorAll(".person-row").forEach(e => e.remove());
+    daysDiv.innerHTML = "";
+    rowsDiv.innerHTML = "";
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month - 1, d);
+      const weekday = ["日","月","火","水","木","金","土"][date.getDay()];
+      const dayDiv = document.createElement("div");
+      dayDiv.className = "day";
+      dayDiv.textContent = `${d}日(${weekday})`;
+      daysDiv.appendChild(dayDiv);
+    }
+
+    const savedMeta = JSON.parse(localStorage.getItem("shift_meta") || "[]");
+
+    for (let i = 0; i < numPeople; i++) {
+      const meta = savedMeta[i] || { name: "", place: "" };
+
+      const row = document.createElement("div");
+      row.className = "person-row";
+
+      const personDiv = document.createElement("div");
+      personDiv.className = "person";
+      const personInput = document.createElement("input");
+      personInput.placeholder = `キャスト${i+1}`;
+      personInput.value = meta.name;
+      personDiv.appendChild(personInput);
+
+      const placeDiv = document.createElement("div");
+      placeDiv.className = "place";
+      const placeInput = document.createElement("input");
+      placeInput.placeholder = "お迎え場所";
+      placeInput.value = meta.place;
+      placeDiv.appendChild(placeInput);
+
+      row.appendChild(personDiv);
+      row.appendChild(placeDiv);
+      sidebar.appendChild(row);
+
+      const timelineRow = document.createElement("div");
+      timelineRow.className = "row";
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+        const savedData = JSON.parse(localStorage.getItem("shift_" + dateStr) || "[]");
+        const pData = savedData[i] || { start:"", end:"" };
+
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.dataset.date = dateStr;
+
+        const startDiv = document.createElement("div");
+        startDiv.className = "time-select";
+        const startHour = document.createElement("select");
+        startHour.innerHTML = `<option value="">--</option>${hours.map(h=>`<option value="${h}" ${pData.start.split(":")[0]==h?"selected":""}>${h}</option>`).join("")}`;
+        const startMin = document.createElement("select");
+        startMin.innerHTML = `<option value="">--</option>${minutes.map(m=>`<option value="${m}" ${pData.start.split(":")[1]==m?"selected":""}>${m}</option>`).join("")}`;
+        startDiv.appendChild(startHour);
+        startDiv.appendChild(startMin);
+
+        const endDiv = document.createElement("div");
+        endDiv.className = "time-select";
+        const endHour = document.createElement("select");
+        endHour.innerHTML = `<option value="">--</option>${hours.map(h=>`<option value="${h}" ${pData.end.split(":")[0]==h?"selected":""}>${h}</option>`).join("")}`;
+        const endMin = document.createElement("select");
+        endMin.innerHTML = `<option value="">--</option>${minutes.map(m=>`<option value="${m}" ${pData.end.split(":")[1]==m?"selected":""}>${m}</option>`).join("")}`;
+        endDiv.appendChild(endHour);
+        endDiv.appendChild(endMin);
+
+        cell.appendChild(startDiv);
+        cell.appendChild(endDiv);
+        timelineRow.appendChild(cell);
+      }
+      rowsDiv.appendChild(timelineRow);
+    }
+  }
+
+  // --- 時間変換（24時超え対応 修正版） ---
+  function parseTimeWithDate(baseDate, timeStr) {
+    timeStr = timeStr.replace("：", ":");
+    let [h, m] = timeStr.split(":").map(v => parseInt(v || "0", 10));
+
+    let resultDate = new Date(baseDate); // コピーを作る
+    if (h >= 24) {
+      resultDate.setDate(resultDate.getDate() + 1); // 翌日扱い
+      h -= 24;
+    }
+
+    return {
+      date: resultDate,
+      hour: String(h).padStart(2, "0"),
+      minute: String(m).padStart(2, "0")
+    };
+  }
+
+  function processChat() {
+    const input = document.getElementById("chatInput").value.trim();
+    if (!input) return;
+
+    const monthInput = document.getElementById("monthSelect").value;
+    if (!monthInput) {
+      alert("月を選択してください");
+      return;
+    }
+    const [year, month] = monthInput.split("-");
+    let metaData = JSON.parse(localStorage.getItem("shift_meta") || "[]");
+
+    const regex = /([^\s\d]+)?\s*(\d{1,2})\/(\d{1,2})\s+(\d{1,2}(?::\d{0,2})?)[～-](\d{1,2}(?::\d{0,2})?)/g;
+    let match;
+    let currentName = "";
+
+    while ((match = regex.exec(input)) !== null) {
+      if (match[1]) currentName = match[1].trim();
+      if (!currentName) continue;
+
+      const [, , m, d, startRaw, endRaw] = match;
+      let baseDate = new Date(year, m-1, d);
+
+      const startParsed = parseTimeWithDate(new Date(baseDate), startRaw);
+      const endParsed = parseTimeWithDate(new Date(baseDate), endRaw);
+
+      // ✅ 修正: UTC基準ではなくローカル日付で保存
+      const dateStr = formatDateLocal(startParsed.date);
+      let savedData = JSON.parse(localStorage.getItem("shift_" + dateStr) || "[]");
+
+      let idx = metaData.findIndex(meta => meta.name === currentName);
+      if (idx === -1) {
+        idx = metaData.length;
+        metaData[idx] = { name: currentName, place: "" };
+      }
+
+      savedData[idx] = {
+        name: currentName,
+        place: metaData[idx].place || "",
+        start: `${startParsed.hour}:${startParsed.minute}`,
+        end: `${endParsed.hour}:${endParsed.minute}`
+      };
+      localStorage.setItem("shift_" + dateStr, JSON.stringify(savedData));
+    }
+
+    localStorage.setItem("shift_meta", JSON.stringify(metaData));
+    generateTable();
+    alert("チャット入力からシフトを反映しました！");
+  }
+
+  function applyShifts() {
+    const monthInput = document.getElementById("monthSelect").value;
+    if (!monthInput) return;
+    const [year, month] = monthInput.split("-");
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    const rows = document.querySelectorAll("#rows .row");
+    const names = document.querySelectorAll(".person input");
+    const places = document.querySelectorAll(".place input");
+
+    let today = new Date();
+    let todayStr = formatDateLocal(today); // ✅ 修正済
+    let todayData = [];
+    let metaData = [];
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      let dataForDate = [];
+
+      rows.forEach((row, idx) => {
+        const cell = row.querySelectorAll(".cell")[d-1];
+        const [startDiv, endDiv] = cell.querySelectorAll(".time-select");
+
+        const startHour = startDiv.querySelectorAll("select")[0].value;
+        const startMin  = startDiv.querySelectorAll("select")[1].value;
+        const endHour   = endDiv.querySelectorAll("select")[0].value;
+        const endMin    = endDiv.querySelectorAll("select")[1].value;
+
+        const start = (startHour && startMin) ? `${startHour}:${startMin}` : "";
+        const end   = (endHour && endMin) ? `${endHour}:${endMin}` : "";
+
+        const name  = names[idx].value;
+        const place = places[idx].value;
+
+        if (!metaData[idx]) metaData[idx] = {};
+        metaData[idx].name = name;
+        metaData[idx].place = place;
+
+        if (name || place || start || end) {
+          dataForDate[idx] = { name, place, start, end };
+        }
+      });
+
+      localStorage.setItem("shift_" + dateStr, JSON.stringify(dataForDate));
+
+      if (dateStr === todayStr) {
+        todayData = dataForDate.filter(e => e && (e.start || e.end));
+      }
+    }
+
+    localStorage.setItem("shift_meta", JSON.stringify(metaData));
+    localStorage.setItem("shift_today", JSON.stringify(todayData));
+
+    alert("反映しました！（今日出勤のキャストのみタイムスケジュールに反映）");
+  }
+
+  window.addEventListener("load", () => {
+    const savedMonth = localStorage.getItem("shift_selectedMonth");
+    const monthInput = document.getElementById("monthSelect");
+    if (savedMonth) monthInput.value = savedMonth;
+    else {
+      const now = new Date();
+      monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    }
+    generateTable();
+  });
+</script>
+</body>
+</html>
