@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <div class="nav">
-  <button class="active" onclick="location.href='index.html'">タイムスケジュール</button>
+  <button class="active" onclick="location.href='タイムスケジュール.html'">タイムスケジュール</button>
   <button onclick="location.href='シフト表.html'">シフト表</button>
   <button onclick="location.href='予約管理ページ.html'">予約管理</button>
   <button onclick="location.href='割引設定ページ.html'">割引設定ページ</button>
@@ -229,9 +229,12 @@ function loadSchedule(dateStr) {
     timelineRow.className = "row";
     rowsDiv.appendChild(timelineRow);
 
-    // 予約（黄色バー）
+// 🔹 予約（黄色バー）描画
 const reservations = JSON.parse(localStorage.getItem("reservations_" + dateStr) || "[]");
 reservations.forEach(r => {
+  // 名前が空ならタイムスケジュールには出さない
+  if (!r.cast || r.cast.trim() === "") return;
+
   const sidebarRows = document.querySelectorAll("#sidebar .person-row");
   sidebarRows.forEach((row, idx) => {
     const castInput = row.querySelector(".col input");
@@ -241,8 +244,7 @@ reservations.forEach(r => {
 
       const [sh, sm] = r.start.split(":").map(Number);
       let start = sh + sm/60;
-      let end = start + (r.course ? r.course/60 : 1); // courseがなければ仮1時間
-
+      let end = start + (r.course ? r.course/60 : 1);
       if (sh < 9) start += 24;
       if (end < start) end += 24;
 
@@ -259,6 +261,7 @@ reservations.forEach(r => {
     }
   });
 });
+
 
 
     if (p.start && p.end) {
